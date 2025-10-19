@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Direct Manipulation: Matrix Splitter</title>
+    <!--import D3.js library-->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /*styling for the page*/
+        body{
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 2rem;
+        }
+
+        h1{
+            color: #212529;
+            font-weight: 700;
+        }
+
+        p, footer{
+            max-width: 650px;
+            text-align: center;
+            line-height: 1.6;
+            color: #4a5158;
+        }
+
+        /*container for the main matrix visualization*/
+        #main-matrix-container{
+            margin-top: 2rem;
+            padding: 1rem;
+            border: 1px solid #ffffff;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0);
+        }
+        
+        /*container for the new smaller matrices that are created*/
+        #split-matrices-container{
+            margin-top: 2rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2rem;
+            width: 100%;
+        }
+
+        /*styling for the matrix cards */
+        .split-matrix-card {
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .split-matrix-card .title {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        /*styling for the D3 brush selection rectangle */
+        .selection {
+            fill: #72aee6;
+            fill-opacity: 0.3;
+            stroke: #007bff;
+            stroke-width: 1px;
+        }
+
+        footer {
+            margin-top: 3rem;
+            font-size: 0.8rem;
+            color: #adb5bd;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Direct Manipulation: Matrix Splitter</h1>
+    
+    <p>
+        <strong>Instructions:</strong> Click and drag your mouse over any group of cells in the matrix. When you release, a new matrix will be created from your selection. This demonstrates direct manipulation by allowing direct operation on the visual representation of the data.
+    </p>
+
+    <!--holds the main 20x25 matrix -->
+    <div id="main-matrix-container"></div>
+
+    <!--holds all the smaller matrices created by the user -->
+    <div id="split-matrices-container"></div>
+
+    <footer>
+        <p><strong>Reference:</strong> The brushing/highlighting interaction method of selecting a data subset is inspired by the Vega.lite visualization tool.</p>
+    </footer>
+
+    <script>
+        //cell count and size
+        const MAIN_ROWS = 20;
+        const MAIN_COLS = 25;
+        const CELL_SIZE = 20; 
+        //label new matrices
+        let splitMatrixCounter = 0;
+
+        /**
+         * generates a 2D array with random values between 0 and 1.
+         * @param rows - the number of rows for the matrix.
+         * @param cols - the number of columns for the matrix.
+         * @returns matrix - the generated matrix data.
+         */
+        function generateMatrixData(rows, cols) {
+            const matrix = [];
+            for (let i = 0; i < rows; i++) {
+                const row = [];
+                for (let j = 0; j < cols; j++) {
+                    row.push(Math.random());
+                }
+                matrix.push(row);
+            }
+            return matrix;
+        }
+
+        //color scale for heatmap effect (0 is light 1 is dark)
+        const colorScale = d3.scaleSequential(d3.interpolateBlues).domain([0, 1]);
+
+        /**
+         * draws matrix as a heatmap in a passed container.
+         * @param container - D3 selection of the container to draw in.
+         * @param data - matrix data to visualize.
+         */
+        function drawMatrix(container, data) {
+            const rows = data.length;
+            const cols = data[0].length;
+            const width = cols * CELL_SIZE;
+            const height = rows * CELL_SIZE;
+
+            //SVG element to hold the matrix
+            const svg = container.append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            //group for each row
+            const rowGroups = svg.selectAll(".row")
+                .data(data)
+                .enter()
+                .append("g")
+                .attr("class", "row")
+                .attr("transform", (d, i) => `translate(0, ${i * CELL_SIZE})`);
+
+            //rectangle for each cell in each row
+            const cells = rowGroups.selectAll(".cell")
+                .data(d => d)
+                .enter()
+                .append("rect")
+                .attr("class", "cell")
+                .attr("x", (d, i) => i * CELL_SIZE)
+                .attr("width", CELL_SIZE)
+                .attr("height", CELL_SIZE)
+                .attr("fill", d => colorScale(d))
+                .attr("stroke", "#fff") 
+                .attr("stroke-width", 1);
+        }
+
+        /**
+         * handles brushing logic and selection.
+         * @param event - D3 brush event object.
+         * @param sourceData - original matrix data.
+         */
+        function handleBrushEnd(event, sourceData) {
+            const selection = event.selection;
+            
+            //if no selection do nothing, handles empty click
+            if (!selection) return;
+
+            //get top left and bottom right corner coordinates
+            const [
+                [x0, y0],
+                [x1, y1]
+            ] = selection;
+
+            //convert to matrix indices
+            const startCol = Math.floor(x0 / CELL_SIZE);
+            const startRow = Math.floor(y0 / CELL_SIZE);
+            const endCol = Math.floor(x1 / CELL_SIZE);
+            const endRow = Math.floor(y1 / CELL_SIZE);
+            
+            //copy subset from the original matrix
+            const subMatrixData = [];
+            for (let i = startRow; i <= endRow; i++) {
+                //define out of bounds for brush
+                if (sourceData[i]) {
+                    subMatrixData.push(sourceData[i].slice(startCol, endCol + 1));
+                }
+            }
+            
+            //check for valid selection (at least one cell)
+            if (subMatrixData.length > 0 && subMatrixData[0].length > 0) {
+                splitMatrixCounter++;
+                const newRows = subMatrixData.length;
+                const newCols = subMatrixData[0].length;
+                
+                //create new container for split matrix
+                const splitContainer = d3.select("#split-matrices-container")
+                    .append("div")
+                    .attr("class", "split-matrix-card");
+
+                splitContainer.append("div")
+                    .attr("class", "title")
+                    .text(`child matrix #${splitMatrixCounter} (${newRows}x${newCols})`);
+
+                //draw new matrix
+                drawMatrix(splitContainer, subMatrixData);
+            }
+            
+            //clear brush selection for the next interaction
+            d3.select(this).call(brush.move, null);
+        }
+
+        //generate initial data
+        const mainMatrixData = generateMatrixData(MAIN_ROWS, MAIN_COLS);
+        
+        //select main container and draw initial matrix
+        const mainContainer = d3.select("#main-matrix-container");
+        drawMatrix(mainContainer, mainMatrixData);
+
+        //set up brush for direct manipulation
+        const brush = d3.brush()
+            //set extent to full matrix size
+            .extent([
+                [0, 0],
+                [MAIN_COLS * CELL_SIZE, MAIN_ROWS * CELL_SIZE]
+            ])
+            //link brush end to handler 
+            .on("end", (event) => handleBrushEnd(event, mainMatrixData));
+            
+        //apply the brush to the main matrix's SVG element
+        mainContainer.select("svg").call(brush);
+
+    </script>
+</body>
+</html>
